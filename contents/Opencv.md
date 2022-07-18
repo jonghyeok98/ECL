@@ -57,7 +57,7 @@ waitKey(delay time);
 * delay time: 키 입력을 기다릴 시간
     > 0을 입력하면 무한 대기
 
-> imshow() 함수를 사용하게 되면 waitKey() 함수가 필수적으로 따라와야 한다.
+imshow() 함수를 사용하게 되면 waitKey() 함수가 필수적으로 따라와야 한다.
  * waitKey() 함수를 사용하지 않으면 이미지가 노출되자마자 코드가 종료됨
 
 <br>
@@ -78,6 +78,137 @@ phi = acos(z / radius) // or phi = atan2(y, x)
 
 <br>
 
+
+``` cpp
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
+#include <iostream>
+#include <stdio.h>
+#include<math.h>
+
+using namespace cv;
+using namespace std;
+
+#define PI    3.141592653589793
+
+typedef struct {
+    float pos[3]; // 0: x, 1: y, 2: z 좌표
+}Pos;
+
+float * GetCubemapCoordinate(float * p, int x, int y, int face, int edge);
+Mat SphToCubemap();
+
+
+int main(int, char**)
+{
+    Mat img=imread("C:\\Users\\jonghyeok\\Desktop\\git\\ECL\\contents\\Images\\Opencv\\spherical.jpg", 1);
+
+    Pos p;
+
+    Mat cubemap = SphToCubemap(img, p.pos);
+
+    imshow("dfae", cubemap);
+    waitKey(0);
+
+    return 0;
+}
+
+
+
+
+float * GetCubemapCoordinate(float * p, int x, int y, int face, int edge)
+{
+    float a = 2.0 * float(x / edge);
+    float b = 2.0 * float(y / edge);
+
+    p[0] = 0;      // x 좌표 초기화
+    p[1] = 0;      // y 좌표 초기화
+    p[2] = 0;      // z 좌표 초기화
+
+    if (face == 0)    // back
+    {
+        p[0] = -1.0;
+        p[1] = 1.0 - a;
+        p[2] = 3.0 - b;
+    }
+    else if (face == 1) // left
+    {
+        p[0] = a - 3.0;
+        p[1] = -1.0;
+        p[2] = 3.0 - b;
+    }
+    else if( face == 2) // front
+    {
+        p[0] = 1.0;
+        p[1] = a - 5.0;
+        p[2] = 3.0 - b;
+    }
+    else if (face == 3) // right
+    {
+        p[0] = 7.0 - a;
+        p[1] = 1.0;
+        p[2] = 3.0 - b;
+    }
+    else if (face == 4) // top
+    {
+        p[0] = b - 1.0;
+        p[1] = a - 5.0;
+        p[2] = 1.0;
+    }
+    else if (face == 5) // bottom
+    {
+        p[0] = 5.0 - b;
+        p[1] = a - 5.0;
+        p[2] = -1.0;
+    }
+    return p;
+}
+
+Mat SphToCubemap(Mat sph, float * p)
+{
+    Mat cube;
+    int width = sph.size().width;
+    int height = float(3/4) * sph.size().width;
+    int edge = sph.size().width;
+    int startidx, range;
+
+    float theta, phi;
+    float u, v;
+
+    for (int i = 0; i < width; i++)
+    {
+        int face = 1.0*i / edge;
+        
+        if (face == 1)  // left
+        {
+            startidx = 0;
+            range = 3 * edge;
+        }
+        else
+        {
+            startidx = edge;
+            range = 2 * edge;
+        }
+        for (int j = startidx; j < range; j++)
+        {
+            if (j < edge)
+                face = 4;  // top
+            else if (j >= 2 * edge)
+                face = 5;  // bottom
+            p = GetCubemapCoordinate(p,i, j, face, edge);
+            theta = atan2(p[1], p[0]);
+            phi = atan2(p[2], sqrt(p[0] * p[0] + p[1] * p[1]));
+            u = 2 * edge * ((theta + PI) / PI);
+            v = 2 * edge * (((PI / 2) - phi) / PI);
+            cube.at<Vec3f>(i, j) = sph.at<Vec3f>(u, v);
+            
+        }
+
+    }
+    return cube;
+}
+
+```
 
 
 ref) 

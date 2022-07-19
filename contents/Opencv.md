@@ -95,17 +95,17 @@ typedef struct {
     float pos[3]; // 0: x, 1: y, 2: z 좌표
 }Pos;
 
-float * GetCubemapCoordinate(float * p, int x, int y, int face, int edge);
-Mat SphToCubemap();
+float* GetCubemapCoordinate(float* p, int x, int y, int face, int edge);
+Mat SphToCubemap(Mat *sph, float * p);
 
 
 int main(int, char**)
 {
-    Mat img=imread("C:\\Users\\jonghyeok\\Desktop\\git\\ECL\\contents\\Images\\Opencv\\spherical.jpg", 1);
+    Mat img = imread("C:\\Users\\admin\\Desktop\\git\\ECL\\contents\\Images\\Opencv\\spherical.jpg", 1);
 
     Pos p;
 
-    Mat cubemap = SphToCubemap(img, p.pos);
+    Mat cubemap = SphToCubemap(&img, p.pos);
 
     imshow("dfae", cubemap);
     waitKey(0);
@@ -116,7 +116,7 @@ int main(int, char**)
 
 
 
-float * GetCubemapCoordinate(float * p, int x, int y, int face, int edge)
+float* GetCubemapCoordinate(float* p, int x, int y, int face, int edge)
 {
     float a = 2.0 * float(x / edge);
     float b = 2.0 * float(y / edge);
@@ -137,7 +137,7 @@ float * GetCubemapCoordinate(float * p, int x, int y, int face, int edge)
         p[1] = -1.0;
         p[2] = 3.0 - b;
     }
-    else if( face == 2) // front
+    else if (face == 2) // front
     {
         p[0] = 1.0;
         p[1] = a - 5.0;
@@ -164,21 +164,23 @@ float * GetCubemapCoordinate(float * p, int x, int y, int face, int edge)
     return p;
 }
 
-Mat SphToCubemap(Mat sph, float * p)
+Mat SphToCubemap(Mat *sph, float* p)
 {
     Mat cube;
-    int width = sph.size().width;
-    int height = float(3/4) * sph.size().width;
-    int edge = sph.size().width;
+    int width = sph->size().width;
+    int height = 0.75 * sph->size().width;
+    int edge = sph->size().width / 4;
     int startidx, range;
+
+    cube = Mat::zeros(height, width, sph->type());
 
     float theta, phi;
     float u, v;
 
     for (int i = 0; i < width; i++)
     {
-        int face = 1.0*i / edge;
-        
+        int face = i / edge;
+
         if (face == 1)  // left
         {
             startidx = 0;
@@ -195,12 +197,13 @@ Mat SphToCubemap(Mat sph, float * p)
                 face = 4;  // top
             else if (j >= 2 * edge)
                 face = 5;  // bottom
-            p = GetCubemapCoordinate(p,i, j, face, edge);
+            p = GetCubemapCoordinate(p, i, j, face, edge);
             theta = atan2(p[1], p[0]);
-            phi = atan2(p[2], sqrt(p[0] * p[0] + p[1] * p[1]));
+            phi = atan2(p[2], sqrt((p[0] * p[0]) + (p[1] * p[1])));
             u = 2 * edge * ((theta + PI) / PI);
             v = 2 * edge * (((PI / 2) - phi) / PI);
-            cube.at<Vec3f>(i, j) = sph.at<Vec3f>(u, v);
+
+            cube.at<Vec3f>(j, i) = sph->at<Vec3f>(v, u);
             
         }
 

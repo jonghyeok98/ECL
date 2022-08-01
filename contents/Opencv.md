@@ -78,36 +78,45 @@ phi = acos(z / radius) // or phi = atan2(y, x)
 
 <br>
 
-
+### Panorama To Cubemap
 ``` cpp
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <iostream>
-#include <stdio.h>
-#include<math.h>
+#include <cmath>
 
 using namespace cv;
 using namespace std;
 
 #define PI    3.141592653589793
 
+
+// x, y, z 좌표를 가지는 구조체 선언
 typedef struct {
     float pos[3]; // 0: x, 1: y, 2: z 좌표
 }Pos;
 
+// 함수 선언부
+
+// 큐브맵
 float* GetCubemapCoordinate(float* p, int x, int y, int face, int edge);
+
+
+// panorama to cubemap
 Mat SphToCubemap(Mat *sph, float * p);
 
 
-int main(int, char**)
+int main(int argc, char* argv[])
 {
-    Mat img = imread("C:\\Users\\admin\\Desktop\\git\\ECL\\contents\\Images\\Opencv\\spherical.jpg", 1);
+    Mat img = imread("panorama.png", 1);
 
-    Pos p;
+    Pos p;       // x, y, z 좌표를 가지는 구조체 선언
 
-    Mat cubemap = SphToCubemap(&img, p.pos);
 
-    imshow("dfae", cubemap);
+    // panorama to cubemap
+    Mat cubemap = SphToCubemap(&img, p.pos); 
+
+    imshow("cubemap", cubemap);
     waitKey(0);
 
     return 0;
@@ -115,9 +124,13 @@ int main(int, char**)
 
 
 
-
+// 구면 좌표계 -> 데카르트 좌표계 투영
 float* GetCubemapCoordinate(float* p, int x, int y, int face, int edge)
 {
+    //    -1 ~1 사이 정규화된 좌표값 내에서 point를 정해주어야 한다.
+    //    즉, 2의 길이가 필요하기 때문에 a, b에 2를 곱해준다.
+    //    edge < y < 2 * edge 사이 b = 2 * 1. ? ? ? ? ? ? f이고, 2~4의 범위를 갖는다.
+
     float a = 2.0 * float(x / edge);
     float b = 2.0 * float(y / edge);
 
@@ -151,37 +164,58 @@ float* GetCubemapCoordinate(float* p, int x, int y, int face, int edge)
     }
     else if (face == 4) // top
     {
-        p[0] = b - 1.0;
-        p[1] = a - 5.0;
+        p[0] = a-3.0;
+        p[1] = 1.0-b;
         p[2] = 1.0;
     }
     else if (face == 5) // bottom
     {
-        p[0] = 5.0 - b;
-        p[1] = a - 5.0;
+        p[0] = a - 3.0;
+        p[1] = b - 5.0;
         p[2] = -1.0;
     }
     return p;
 }
 
+// Panorama To Cubemap
 Mat SphToCubemap(Mat *sph, float* p)
 {
+    /*
+       구면 파노라마 이미지 너비, 높이 구하기
+       이 때 cubeWidth는 6칸(Back, Left, Front, Right, Top, Bottom)으로 나누어진 맵의 가로값이다
+       즉, 파노라마 이미지의 가로값과 같다
+       cubeHeight는 맵의 세로값. 즉 (Top, Left, Bottom) 세 칸을 차지함.
+       본 이미지는 1:2 비율을 갖고 4칸:3칸이므로 0.75f를 곱해줌.
+    */
+
     Mat cube;
-    int width = sph->size().width;
+    
     int height = 0.75 * sph->size().width;
+    int width = sph->size().width;
+    
+    // edge(한 큐브맵의 선)는 정사각형의 한 선이므로
+    // width / 4
+    int face, startidx, range;        
     int edge = sph->size().width / 4;
-    int startidx, range;
 
-    cube = Mat::zeros(height, width, sph->type());
-
+    // 경도를 나타내는 phi
+    // 위도를 나타내는 theta
     float theta, phi;
     float u, v;
 
+    cube = Mat::zeros(height, width, sph->type());
+
+    // 큐브맵의 가로(width)는 동일한 상태에서
+    // 가로4칸 세로3칸을 수행하기 위해 
+    // face가 1(가로) 혹은 4, 5(세로) 일 경우의 범위를 다르게 한다
     for (int i = 0; i < width; i++)
     {
-        int face = i / edge;
+        face = i / edge;
 
-        if (face == 1)  // left
+        // left일 경우 가로이기 때문에 top, bottom은 고려할 대상이 아니다
+        // face = 0, (1, 4, 5), 2 ,3 으로 진행한다
+
+        if (face == 1)  // left(top, bootm)
         {
             startidx = 0;
             range = 3 * edge;
@@ -191,26 +225,55 @@ Mat SphToCubemap(Mat *sph, float* p)
             startidx = edge;
             range = 2 * edge;
         }
+
+        // face가 left일 때 아래 조건에 걸려 face가 4, 5로 변경되는 것을 막아준다
+        int priv_face = face;
+
         for (int j = startidx; j < range; j++)
         {
             if (j < edge)
-                face = 4;  // top
+                face = 4;     // top
             else if (j >= 2 * edge)
-                face = 5;  // bottom
+                face = 5;     // bottom
+
+            // 1. 파노라마 이미지를 큐브맵 좌표계에 배치
+            //      - top, bootom, front, back, right, left중 어떤 면에 위치했는지
+            //      - 큐브맵 좌표를 얻는다
+            // 2. (x, y, z)로 표현되는 큐브맵 좌표를 (r, theta, phi)로 표현되는
+            //    구면 좌표계로 변환한다
+            // 3. 구면 좌표계를 구면 파노라마 좌표게로 변환한다
+            // 4. 해당되는 좌표의 정보를 큐브맵 좌표에 대입한다
+
+            // 구면 좌표계 -> 큐브맵의 데카르트 좌표계 투영
             p = GetCubemapCoordinate(p, i, j, face, edge);
+
+
+            // atan2(a, b)는 웑머에서 (a, b) 까지의 상대적인 각도(위치)
+            // phi는 경도로 원점에서 (y, x)까지의 상대적인 각도
+            // 이 때 (y, x)는 큐브맵 위의 한 face 위 점이므로 구면 파노라마의 
+            // 한 좌표로 표현하기 위해 atan2를 사용한다
+            // 
+            // theta는 위도이고 -90 ~ 90 범위를 가진다
+            // 범위를 벗어나게 하지 않기 위해 x, y 사이 거리를 2번째 인자로 전달한다
+            // 원점이 기준이기 때문에 원점과 (z, 거리) 사이의 각도
             theta = atan2(p[1], p[0]);
             phi = atan2(p[2], sqrt((p[0] * p[0]) + (p[1] * p[1])));
+
+            // (phi + PI)/PI 는 phi 만큼 회전한 구면 위의 이미지 상 (x, y) 좌표
+            // ((PI/2) - theta)/PI 는 범위 내에서 theta 만큼 횐전한 구면 위의
+            // 이미지 상 (x, y, z) 좌표
+      
             u = 2 * edge * ((theta + PI) / PI);
             v = 2 * edge * (((PI / 2) - phi) / PI);
 
-            cube.at<Vec3f>(j, i) = sph->at<Vec3f>(v, u);
-            
+            // 구한 구면 파노라마의 좌표를 큐브맵 좌표에 대입
+            cube.at<Vec3b>(j, i) = sph->at<Vec3b>(v, u);
+            face = priv_face;
         }
 
     }
     return cube;
 }
-
 ```
 
 

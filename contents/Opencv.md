@@ -78,9 +78,9 @@ phi = acos(z / radius) // or phi = atan2(y, x)
 
 <br>
 
-### Panorama To Cubemap
-``` cpp
+### 코드
 #include <opencv2/core.hpp>
+#include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
 #include <iostream>
 #include <cmath>
@@ -91,10 +91,7 @@ using namespace std;
 #define PI    3.141592653589793
 
 
-// x, y, z 좌표를 가지는 구조체 선언
-typedef struct {
-    float pos[3]; // 0: x, 1: y, 2: z 좌표
-}Pos;
+
 
 // 함수 선언부
 
@@ -103,22 +100,26 @@ float* GetCubemapCoordinate(float* p, int x, int y, int face, int edge);
 
 
 // panorama to cubemap
-Mat SphToCubemap(Mat *sph, float * p);
+Mat SphToCubemap(Mat* sph, float* p);
+Mat CubemapToSph(Mat* cube, Mat* sphrical);
 
 
 int main(int argc, char* argv[])
 {
     Mat img = imread("panorama.png", 1);
-
-    Pos p;       // x, y, z 좌표를 가지는 구조체 선언
+    float* p = new float[3];       // x, y, z 좌표를 가지는 구조체 선언
 
 
     // panorama to cubemap
-    Mat cubemap = SphToCubemap(&img, p.pos); 
+    
+    Mat cubemap = SphToCubemap(&img, p);
+    Mat spherical = CubemapToSph(&cubemap, &img);
 
     imshow("cubemap", cubemap);
+    imshow("spherical", spherical);
     waitKey(0);
-
+    
+    delete p;
     return 0;
 }
 
@@ -131,8 +132,8 @@ float* GetCubemapCoordinate(float* p, int x, int y, int face, int edge)
     //    즉, 2의 길이가 필요하기 때문에 a, b에 2를 곱해준다.
     //    edge < y < 2 * edge 사이 b = 2 * 1. ? ? ? ? ? ? f이고, 2~4의 범위를 갖는다.
 
-    float a = 2.0 * float(x / edge);
-    float b = 2.0 * float(y / edge);
+    float a = 2 * (1.0 * x / edge);
+    float b = 2 * (1.0 *y / edge);
 
     p[0] = 0;      // x 좌표 초기화
     p[1] = 0;      // y 좌표 초기화
@@ -164,8 +165,8 @@ float* GetCubemapCoordinate(float* p, int x, int y, int face, int edge)
     }
     else if (face == 4) // top
     {
-        p[0] = a-3.0;
-        p[1] = 1.0-b;
+        p[0] = a - 3.0;
+        p[1] = 1.0 - b;
         p[2] = 1.0;
     }
     else if (face == 5) // bottom
@@ -188,8 +189,6 @@ Mat SphToCubemap(Mat *sph, float* p)
        본 이미지는 1:2 비율을 갖고 4칸:3칸이므로 0.75f를 곱해줌.
     */
 
-    Mat cube;
-    
     int height = 0.75 * sph->size().width;
     int width = sph->size().width;
     
@@ -203,7 +202,9 @@ Mat SphToCubemap(Mat *sph, float* p)
     float theta, phi;
     float u, v;
 
+    Mat cube;
     cube = Mat::zeros(height, width, sph->type());
+
 
     // 큐브맵의 가로(width)는 동일한 상태에서
     // 가로4칸 세로3칸을 수행하기 위해 
@@ -256,15 +257,15 @@ Mat SphToCubemap(Mat *sph, float* p)
             // theta는 위도이고 -90 ~ 90 범위를 가진다
             // 범위를 벗어나게 하지 않기 위해 x, y 사이 거리를 2번째 인자로 전달한다
             // 원점이 기준이기 때문에 원점과 (z, 거리) 사이의 각도
-            theta = atan2(p[1], p[0]);
-            phi = atan2(p[2], sqrt((p[0] * p[0]) + (p[1] * p[1])));
+            phi = atan2(p[1], p[0]);
+            theta = atan2(p[2], sqrt((p[0] * p[0]) + (p[1] * p[1])));
 
             // (phi + PI)/PI 는 phi 만큼 회전한 구면 위의 이미지 상 (x, y) 좌표
             // ((PI/2) - theta)/PI 는 범위 내에서 theta 만큼 횐전한 구면 위의
             // 이미지 상 (x, y, z) 좌표
       
-            u = 2 * edge * ((theta + PI) / PI);
-            v = 2 * edge * (((PI / 2) - phi) / PI);
+            u = 2 * edge * ((phi + PI) / PI);
+            v = 2 * edge * (((PI / 2) - theta) / PI);
 
             // 구한 구면 파노라마의 좌표를 큐브맵 좌표에 대입
             cube.at<Vec3b>(j, i) = sph->at<Vec3b>(v, u);
@@ -273,6 +274,149 @@ Mat SphToCubemap(Mat *sph, float* p)
 
     }
     return cube;
+}
+
+Mat CubemapToSph(Mat* cube, Mat* original)
+{
+    /*
+    구면 파노라마 이미지의 길이는 큐브 맵의 길이를 따른다.
+    구면 파노라마 이미지의 높이는 큐브 맵 길이의 1/2.
+
+    1. 구면 파노라마 이미지 좌표(j, i)를 정규화, 구면 좌표계로 변환한다.
+    2. 구면 좌표계에 대응하는 큐브맵의 좌표를 찾는다.
+    3. 찾은 큐브맵의 좌표가 어느 face에 있는지 찾는다.
+    4. 큐브맵의 좌표를 구면 파노라마 이미지의 좌표(j, i)에 대입한다.
+*/
+    int Width = cube->size().width;
+    float Height = (0.5f) * cube->size().width;
+
+    Mat spherical;
+    spherical = Mat::zeros(original->size().height, original->size().width, cube->type());
+
+    /*
+        좌표계를 0부터 1로 정규화 한다. (0, 0)
+        경도를 나타내기 위한 변수 phi
+        위도를 나타내기 위한 변수 theta
+    */
+    float u, v;
+    float phi, theta;
+    int cubeFaceWidth, cubeFaceHeight;
+
+    cubeFaceWidth = cube->size().width / 4;
+    cubeFaceHeight = cube->size().height / 3;
+
+
+    for (int j = 0; j < Height; j++)
+    {
+        /*
+            (i = 0, j = 0) 부터 j를 높이까지 증가.
+            즉, 구면의 위도 생성.
+            왼쪽 아래부터 시작.
+        */
+        v = 1 - ((float)j / Height);
+        theta = v * PI;
+
+        for (int i = 0; i < Width; i++)
+        {
+            // 위도 상의 한 점(0부터)에서 경도 끝까지 증가
+            u = ((float)i / Width);
+            phi = u * 2 * PI;
+
+            float x, y, z; // 단위 벡터
+            x = cos(phi) * sin(theta) * -1;
+            y = sin(phi) * sin(theta) * -1;
+            z = cos(theta);
+
+            float xa, ya, za;
+            float a;
+
+            a = max(abs(x), max(abs(y), abs(z)));
+
+            /*
+                큐브 면 중 하나에 있는 단위 벡터와 평행한 벡터.
+                이 때, ya가 -1인지 1인지(Left, Right) 값을 보고 평면을 결정.
+
+                ya가 1 or -1이라면 y벡터의 변화가 없다는 뜻. 즉 xz평면만 고려한다는 의미.
+                xa와 za도 동일하게 적용.
+            */
+            xa = x / a;
+            ya = y / a;
+            za = z / a;
+
+            int xPixel, yPixel;
+            int xOffset, yOffset;
+
+
+            /*
+                1. 정규화를 거친 좌표계이기 때문에 2.f로 나누어준다.
+                2. -1 ~ 1로 정규화 되어있는 좌표계에 edge 길이(cubeFaceWidth, cubeFaceHeight)를 곱해준다.
+                3. WorldOffset에 적용한다. 이때 Offset은 큐브맵 좌표계에 따른다.
+            */
+            if (ya == -1)
+            {
+                //Left
+                xPixel = (int)((((xa + 1.f) / 2.f)) * cubeFaceWidth);
+                xOffset = cubeFaceWidth;
+                yPixel = (int)((((za + 1.f) / 2.f)) * cubeFaceHeight);
+                yOffset = cubeFaceHeight;
+            }
+            else if (ya == 1)
+            {
+                //Right
+                xPixel = (int)((((xa - 1.f) / 2.f)) * cubeFaceWidth);
+                xOffset = 3 * cubeFaceWidth;
+                yPixel = (int)((((za + 1.f) / 2.f)) * cubeFaceHeight);
+                yOffset = cubeFaceHeight;
+            }
+            else if (za == -1)
+            {
+                //Top
+                xPixel = (int)((((xa + 1.f) / 2.f)) * cubeFaceWidth);
+                xOffset = cubeFaceWidth;
+                yPixel = (int)((((ya - 1.f) / 2.f)) * cubeFaceHeight);
+                yOffset = 0;
+            }
+            else if (za == 1)
+            {
+                //Bottom
+                xPixel = (int)((((xa + 1.f) / 2.f)) * cubeFaceWidth);
+                xOffset = cubeFaceWidth;
+                yPixel = (int)((((ya + 1.f) / 2.f)) * cubeFaceHeight);
+                yOffset = 2 * cubeFaceHeight;
+            }
+            else if (xa == 1)
+            {
+                //Front
+                xPixel = (int)((((ya + 1.f) / 2.f)) * cubeFaceWidth);
+                xOffset = 2 * cubeFaceWidth;
+                yPixel = (int)((((za + 1.f) / 2.f)) * cubeFaceHeight);
+                yOffset = cubeFaceHeight;
+            }
+            else if (xa == -1)
+            {
+                //Back
+                xPixel = (int)((((ya - 1.f) / 2.f)) * cubeFaceWidth);
+                xOffset = 0;
+                yPixel = (int)((((za + 1.f) / 2.f)) * cubeFaceHeight);
+                yOffset = cubeFaceHeight;
+            }
+            else
+            {
+                xPixel = 0;
+                yPixel = 0;
+                xOffset = 0;
+                yOffset = 0;
+            }
+            xPixel = abs(xPixel);
+            yPixel = abs(yPixel);
+
+            xPixel += xOffset;
+            yPixel += yOffset;
+
+            spherical.at<Vec3b>(j, i) = cube->at<Vec3b>(yPixel, xPixel);
+        }
+    }
+    return spherical;
 }
 ```
 
